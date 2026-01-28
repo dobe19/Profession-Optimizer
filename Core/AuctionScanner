@@ -1,0 +1,261 @@
+-- Core/AuctionScanner.lua
+-- Scans AH commodity prices for path optimization
+
+local AuctionScanner = {}
+AuctionScanner.__index = AuctionScanner
+
+function AuctionScanner:New()
+    local obj = setmetatable({}, self)
+    obj.priceCache = {}
+    obj.lastScan = {}
+    obj.scanCallbacks = {}
+    obj.frame = nil
+    return obj
+end
+
+function AuctionScanner:Initialize()
+    -- Create event frame
+    self.frame = CreateFrame("Frame")
+    self.frame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
+    self.frame:SetScript("OnEvent", function(frame, event, itemID)
+        self:OnCommodityDataReceived(itemID)
+    end)
+    
+    return true
+end
+
+-- ============================================
+-- PRICE FETCHING
+-- ============================================
+
+function AuctionScanner:GetItemPrice(itemID)
+    -- Check cache first (5 minute refresh)
+    local cached = self.priceCache[itemID]
+    if cached and (GetTime() - cached.timestamp) < 300 then
+        return cached.price, cached.quantity, cached.available
+    end
+    
+    -- Return cached even if stale, will update in background
+    if cached then
+        return cached.price, cached.quantity, cached.available
+    end
+    
+    -- No cache, return nil (caller should request scan)
+    return nil, 0, false
+end
+
+function AuctionScanner:RequestPrice(itemID, callback)
+    -- Store callback for when data arrives
+    if not self.scanCallbacks[itemID] then
+        self.scanCallbacks[itemID] = {}
+    end
+    table.insert(self.scanCallbacks[itemID], callback)
+    
+    -- Request commodity search
+    local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+    C_AuctionHouse.RequestMoreCommoditySearchResults(itemKey)
+    
+    -- Timeout after 5 seconds
+    C_Timer.After(5, function()
+        if self.scanCallbacks[itemID] then
+            -- Still waiting, assume not available
+            self:OnCommodityDataReceived(itemID, true) -- Force callback with failure
+        end
+    end)
+end
+
+function AuctionScanner:OnCommodityDataReceived(itemID, forceUnavailable)
+    local numResults = 0
+    
+    if not forceUnavailable then
+        numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
+    end
+    
+    if numResults == 0 then
+        -- Not available on AH
+        self.priceCache[itemID] = {
+            available = false,
+            price = 0,
+            quantity = 0,
+            timestamp = GetTime()
+        }
+    else
+        -- Get cheapest result
+        local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, 1)
+        
+        if result then
+            self.priceCache[itemID] = {
+                available = true,
+                price = result.unitPrice,
+                quantity = result.quantity,
+                numAuctions = numResults,
+                timestamp = GetTime()
+            }
+        end
+    end
+    
+    -- Fire callbacks
+    local callbacks = self.scanCallbacks[itemID]
+    if callbacks then
+        local priceData = self.priceCache[itemID]
+        for _, callback in ipairs(callbacks) do
+            callback(itemID, priceData)
+        end
+        self.scanCallbacks[itemID] = nil
+    end
+end
+
+-- ============================================
+-- BATCH SCANNING
+-- ============================================
+
+function AuctionScanner:ScanMaterials(itemList, progressCallback, completeCallback)
+    local totalItems = #itemList
+    local scannedCount = 0
+    local failedItems = {}
+    
+    local function onItemScanned(itemID, priceData)
+        scannedCount = scannedCount + 1
+        
+        if not priceData or not priceData.available then
+            table.insert(failedItems, itemID)
+        end
+        
+        -- Update progress
+        if progressCallback then
+            progressCallback(scannedCount, totalItems)
+        end
+        
+        -- Check if complete
+        if scannedCount >= totalItems then
+            if completeCallback then
+                completeCallback(self.priceCache, failedItems)
+            end
+        end
+    end
+    
+    -- Request all items with small delays to avoid rate limiting
+    for i, itemID in ipairs(itemList) do
+        C_Timer.After((i-1) * 0.2, function() -- 200ms between requests
+            self:RequestPrice(itemID, onItemScanned)
+        end)
+    end
+end
+
+function AuctionScanner:GetAllMaterialsForProfession(profession)
+    local materials = {}
+    local materialSet = {}
+    
+    local recipes = YourAddonDB.Recipes[profession]
+    if not recipes then
+        return materials
+    end
+    
+    for spellId, recipe in pairs(recipes) do
+        for itemId, quantity in pairs(recipe.materials or {}) do
+            if not materialSet[itemId] then
+                materialSet[itemId] = true
+                table.insert(materials, itemId)
+            end
+        end
+    end
+    
+    return materials
+end
+
+-- ============================================
+-- PRICE STATISTICS
+-- ============================================
+
+function AuctionScanner:GetPriceStats()
+    local stats = {
+        totalCached = 0,
+        available = 0,
+        unavailable = 0,
+        oldestCache = GetTime(),
+        newestCache = 0
+    }
+    
+    for itemID, data in pairs(self.priceCache) do
+        stats.totalCached = stats.totalCached + 1
+        
+        if data.available then
+            stats.available = stats.available + 1
+        else
+            stats.unavailable = stats.unavailable + 1
+        end
+        
+        if data.timestamp < stats.oldestCache then
+            stats.oldestCache = data.timestamp
+        end
+        if data.timestamp > stats.newestCache then
+            stats.newestCache = data.timestamp
+        end
+    end
+    
+    stats.cacheAge = GetTime() - stats.oldestCache
+    
+    return stats
+end
+
+function AuctionScanner:ClearCache()
+    self.priceCache = {}
+    self.lastScan = {}
+end
+
+-- ============================================
+-- BUY FUNCTIONALITY
+-- ============================================
+
+function AuctionScanner:BuyMaterials(shoppingList, maxGoldPerItem)
+    -- This would integrate with AH to actually purchase items
+    -- For now, just a stub that shows what would be bought
+    
+    local purchases = {}
+    
+    for _, item in ipairs(shoppingList) do
+        local itemID = item.itemId
+        local quantity = item.quantity
+        local priceData = self.priceCache[itemID]
+        
+        if priceData and priceData.available then
+            if not maxGoldPerItem or priceData.price <= maxGoldPerItem then
+                table.insert(purchases, {
+                    itemID = itemID,
+                    quantity = quantity,
+                    unitPrice = priceData.price,
+                    totalCost = priceData.price * quantity
+                })
+            end
+        end
+    end
+    
+    return purchases
+end
+
+function AuctionScanner:ExecutePurchases(purchases)
+    -- Placeholder for actual AH purchasing
+    -- Would call C_AuctionHouse.PlaceCommodityBuyOrder() for each item
+    
+    for _, purchase in ipairs(purchases) do
+        print(string.format("Would buy: %dx Item %d @ %dg each = %dg total",
+            purchase.quantity,
+            purchase.itemID,
+            purchase.unitPrice / 10000, -- Convert copper to gold
+            purchase.totalCost / 10000
+        ))
+        
+        -- Actual purchase:
+        -- C_AuctionHouse.PlaceCommodityBuyOrder(
+        --     purchase.itemID,
+        --     purchase.quantity,
+        --     purchase.unitPrice
+        -- )
+    end
+end
+
+-- ============================================
+-- EXPORT
+-- ============================================
+
+return AuctionScanner
