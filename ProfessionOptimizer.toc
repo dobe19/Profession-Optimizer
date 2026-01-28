@@ -1,34 +1,25 @@
-## Interface: 120000
+## Interface: 110002
 ## Title: Profession Optimizer
-## Notes: Optimizes profession leveling paths with farm vs buy comparison and GPS navigation
-## Author: YourName
+## Notes: Profession leveling optimizer
+## Author: Krampus
 ## Version: 1.1.0
 ## SavedVariables: ProfessionOptimizerDB
 ## OptionalDeps: TomTom
 
-# 1. Initialization (Must be first to define the global database)
+# Init first
 Init.lua
 
-# 2. Configuration & Static Data
+# Data
 Data\FarmTimeConfig.lua
 Data\Trainers.lua
+Data\All_Professions_Data.lua
 
-# 3. Profession Recipe Data (Generated from your Python scripts)
-Data\Recipes\Alchemy.lua
-Data\Recipes\Blacksmithing.lua
-Data\Recipes\Enchanting.lua
-Data\Recipes\Engineering.lua
-Data\Recipes\Inscription.lua
-Data\Recipes\Jewelcrafting.lua
-Data\Recipes\Leatherworking.lua
-Data\Recipes\Tailoring.lua
-
-# 4. Core Systems (The logic that uses the data)
-Core\PathOptimizer.lua
+# Core
 Core\AuctionScanner.lua
 Core\BagScanner.lua
+Core\PathOptimizer.lua
 Core\GPSNavigation.lua
 
-# 5. UI Components (The visual interface)
-UI\MainFrame.lua
-UI\AHIntegration.lua
+# UI (comment out until MainFrame is ready)
+# UI\MainFrame.lua
+# UI\AHIntegration.lua
