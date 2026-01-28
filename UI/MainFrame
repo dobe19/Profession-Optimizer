@@ -1,0 +1,655 @@
+-- UI/MainFrame.lua
+-- Main UI window for profession optimizer
+
+local AddonName = "ProfessionOptimizer"
+local MainFrame = {}
+
+-- Create main frame
+function MainFrame:Create()
+    -- Main window
+    local frame = CreateFrame("Frame", AddonName .. "MainFrame", UIParent, "BasicFrameTemplateWithInset")
+    frame:SetSize(450, 600)
+    frame:SetPoint("CENTER")
+    frame:EnableMouse(true)
+    frame:SetMovable(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:Hide()
+    
+    -- Title
+    frame.title = frame:CreateFontString(nil, "OVERLAY")
+    frame.title:SetFontObject("GameFontHighlight")
+    frame.title:SetPoint("TOP", frame.TitleBg, "TOP", 0, -3)
+    frame.title:SetText("Profession Optimizer")
+    
+    self.frame = frame
+    
+    -- Create components
+    self:CreateProfessionDropdown()
+    self:CreateExpansionDropdown()
+    self:CreateSkillInputs()
+    self:CreateCostEstimate()
+    self:CreateOptimizeButton()
+    self:CreatePathDisplay()
+    self:CreateGPSButton()
+    
+    return frame
+end
+
+-- ============================================
+-- PROFESSION DROPDOWN
+-- ============================================
+
+function MainFrame:CreateProfessionDropdown()
+    local frame = self.frame
+    
+    -- Label
+    local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    label:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -35)
+    label:SetText("Profession:")
+    
+    -- Dropdown
+    local dropdown = CreateFrame("Frame", AddonName .. "ProfessionDropdown", frame, "UIDropDownMenuTemplate")
+    dropdown:SetPoint("TOPLEFT", label, "BOTTOMLEFT", -15, -5)
+    
+    local professions = {
+        "Alchemy",
+        "Blacksmithing",
+        "Enchanting",
+        "Engineering",
+        "Inscription",
+        "Jewelcrafting",
+        "Leatherworking",
+        "Tailoring"
+    }
+    
+    UIDropDownMenu_SetWidth(dropdown, 150)
+    UIDropDownMenu_SetText(dropdown, "Select...")
+    
+    UIDropDownMenu_Initialize(dropdown, function(self, level)
+        for _, prof in ipairs(professions) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = prof
+            info.func = function()
+                UIDropDownMenu_SetText(dropdown, prof)
+                MainFrame.selectedProfession = prof
+                MainFrame:OnProfessionChanged()
+            end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+    
+    self.professionDropdown = dropdown
+end
+
+-- ============================================
+-- EXPANSION DROPDOWN
+-- ============================================
+
+function MainFrame:CreateExpansionDropdown()
+    local frame = self.frame
+    
+    -- Label
+    local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    label:SetPoint("TOPLEFT", frame, "TOPLEFT", 250, -35)
+    label:SetText("Expansion:")
+    
+    -- Dropdown
+    local dropdown = CreateFrame("Frame", AddonName .. "ExpansionDropdown", frame, "UIDropDownMenuTemplate")
+    dropdown:SetPoint("TOPLEFT", label, "BOTTOMLEFT", -15, -5)
+    
+    local expansions = {
+    {id = "Classic", name = "Classic"},
+    {id = "TBC", name = "Outland (TBC)"},
+    {id = "WotLK", name = "Northrend (WotLK)"},
+    {id = "Cata", name = "Cataclysm"},
+    {id = "MoP", name = "Pandaria"},
+    {id = "WoD", name = "Draenor"},
+    {id = "Legion", name = "Legion"},
+    {id = "BfA", name = "BfA"},
+    {id = "Shadowlands", name = "Shadowlands"},
+    {id = "Dragonflight", name = "Dragonflight"},
+    {id = "TWW", name = "The War Within"},
+    {id = "Midnight", name = "Midnight (12.0)"} -- Expansion 12
+}
+    
+    UIDropDownMenu_SetWidth(dropdown, 150)
+    UIDropDownMenu_SetText(dropdown, "Select...")
+    
+    UIDropDownMenu_Initialize(dropdown, function(self, level)
+        for _, exp in ipairs(expansions) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = exp.name
+            info.func = function()
+                UIDropDownMenu_SetText(dropdown, exp.name)
+                MainFrame.selectedExpansion = exp.id
+                MainFrame:OnExpansionChanged()
+            end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+    
+    self.expansionDropdown = dropdown
+end
+
+-- ============================================
+-- SKILL LEVEL INPUTS
+-- ============================================
+
+function MainFrame:CreateSkillInputs()
+    local frame = self.frame
+    
+    -- Current Skill
+    local currentLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    currentLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -100)
+    currentLabel:SetText("Current Skill:")
+    
+    local currentBox = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    currentBox:SetSize(60, 30)
+    currentBox:SetPoint("LEFT", currentLabel, "RIGHT", 10, 0)
+    currentBox:SetAutoFocus(false)
+    currentBox:SetNumeric(true)
+    currentBox:SetText("1")
+    currentBox:SetScript("OnTextChanged", function()
+        MainFrame:UpdateCostEstimate()
+    end)
+    self.currentSkillBox = currentBox
+    
+    -- Target Skill
+    local targetLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    targetLabel:SetPoint("LEFT", currentBox, "RIGHT", 30, 0)
+    targetLabel:SetText("Target Skill:")
+    
+    local targetBox = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    targetBox:SetSize(60, 30)
+    targetBox:SetPoint("LEFT", targetLabel, "RIGHT", 10, 0)
+    targetBox:SetAutoFocus(false)
+    targetBox:SetNumeric(true)
+    targetBox:SetText("75")
+    targetBox:SetScript("OnTextChanged", function()
+        MainFrame:UpdateCostEstimate()
+    end)
+    self.targetSkillBox = targetBox
+    
+    -- Auto-detect button
+    local autoButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    autoButton:SetSize(80, 25)
+    autoButton:SetPoint("LEFT", targetBox, "RIGHT", 10, 0)
+    autoButton:SetText("Auto-Detect")
+    autoButton:SetScript("OnClick", function()
+        MainFrame:AutoDetectSkill()
+    end)
+    self.autoDetectButton = autoButton
+end
+
+-- ============================================
+-- COST ESTIMATE DISPLAY
+-- ============================================
+
+function MainFrame:CreateCostEstimate()
+    local frame = self.frame
+    
+    -- Background
+    local bg = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    bg:SetPoint("TOPLEFT", frame, "TOPLEFT", 15, -140)
+    bg:SetSize(420, 60)
+    bg:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    bg:SetBackdropColor(0, 0, 0, 0.8)
+    
+    -- Title
+    local title = bg:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", bg, "TOP", 0, -8)
+    title:SetText("Estimated Cost")
+    
+    -- Cost text
+    local costText = bg:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    costText:SetPoint("CENTER", bg, "CENTER", 0, -5)
+    costText:SetText("Select profession to calculate")
+    self.costEstimateText = costText
+    
+    self.costEstimateBg = bg
+end
+
+-- ============================================
+-- OPTIMIZE BUTTON
+-- ============================================
+
+function MainFrame:CreateOptimizeButton()
+    local frame = self.frame
+    
+    local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    button:SetSize(420, 40)
+    button:SetPoint("TOPLEFT", self.costEstimateBg, "BOTTOMLEFT", 0, -10)
+    button:SetText("OPTIMIZE PATH")
+    button:SetScript("OnClick", function()
+        MainFrame:OnOptimizeClicked()
+    end)
+    
+    -- Make it green and prominent
+    button:SetNormalFontObject("GameFontNormalLarge")
+    
+    self.optimizeButton = button
+end
+
+-- ============================================
+-- PATH DISPLAY (Scrollable)
+-- ============================================
+
+function MainFrame:CreatePathDisplay()
+    local frame = self.frame
+    
+    -- Scroll frame
+    local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", self.optimizeButton, "BOTTOMLEFT", 0, -10)
+    scrollFrame:SetSize(395, 250)
+    
+    -- Background
+    local bg = CreateFrame("Frame", nil, scrollFrame, "BackdropTemplate")
+    bg:SetAllPoints()
+    bg:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    bg:SetBackdropColor(0, 0, 0, 0.9)
+    
+    -- Content frame
+    local content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetSize(370, 250)
+    scrollFrame:SetScrollChild(content)
+    
+    -- Path text
+    local pathText = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    pathText:SetPoint("TOPLEFT", content, "TOPLEFT", 5, -5)
+    pathText:SetWidth(360)
+    pathText:SetJustifyH("LEFT")
+    pathText:SetJustifyV("TOP")
+    pathText:SetText("Click OPTIMIZE PATH to calculate the best leveling route")
+    
+    self.scrollFrame = scrollFrame
+    self.pathContent = content
+    self.pathText = pathText
+end
+
+-- ============================================
+-- GPS BUTTON (TomTom Integration)
+-- ============================================
+
+function MainFrame:CreateGPSButton()
+    local frame = self.frame
+    
+    local button = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    button:SetSize(200, 30)
+    button:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 15, 15)
+    button:SetText("📍 GPS: First Stop")
+    button:SetScript("OnClick", function()
+        MainFrame:OnGPSClicked()
+    end)
+    button:Disable() -- Enable after optimization
+    
+    self.gpsButton = button
+    
+    -- Next step button
+    local nextButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    nextButton:SetSize(200, 30)
+    nextButton:SetPoint("LEFT", button, "RIGHT", 10, 0)
+    nextButton:SetText("Next Step ➡️")
+    nextButton:SetScript("OnClick", function()
+        MainFrame:OnNextStepClicked()
+    end)
+    nextButton:Disable()
+    
+    self.nextStepButton = nextButton
+end
+
+-- ============================================
+-- EVENT HANDLERS
+-- ============================================
+
+function MainFrame:OnProfessionChanged()
+    print("Selected profession: " .. (self.selectedProfession or "None"))
+    self:UpdateCostEstimate()
+end
+
+function MainFrame:OnExpansionChanged()
+    print("Selected expansion: " .. (self.selectedExpansion or "None"))
+    self:UpdateCostEstimate()
+end
+
+function MainFrame:UpdateCostEstimate()
+    if not self.selectedProfession then
+        self.costEstimateText:SetText("Select profession to calculate")
+        return
+    end
+    
+    local currentSkill = tonumber(self.currentSkillBox:GetText()) or 1
+    local targetSkill = tonumber(self.targetSkillBox:GetText()) or 75
+    
+    -- Quick estimate based on average costs
+    -- Real calculation happens on optimize
+    local estimatedGold = (targetSkill - currentSkill) * 50 -- Rough estimate
+    
+    self.costEstimateText:SetText(string.format(
+        "~%d - %d gold\n(Click optimize for exact cost)",
+        math.floor(estimatedGold * 0.8),
+        math.floor(estimatedGold * 1.5)
+    ))
+end
+
+function MainFrame:AutoDetectSkill()
+    if not self.selectedProfession then
+        print("Please select a profession first")
+        return
+    end
+    
+    -- Get player's current profession skill
+    local prof1, prof2 = GetProfessions()
+    local professions = {prof1, prof2}
+    
+    for _, profIndex in ipairs(professions) do
+        if profIndex then
+            local name, _, rank, maxRank = GetProfessionInfo(profIndex)
+            if name == self.selectedProfession then
+                self.currentSkillBox:SetText(tostring(rank))
+                print(string.format("Detected %s: %d/%d", name, rank, maxRank))
+                return
+            end
+        end
+    end
+    
+    print("Profession not found on character")
+end
+
+function MainFrame:OnOptimizeClicked()
+    -- Validate inputs
+    if not self.selectedProfession then
+        print("Please select a profession")
+        return
+    end
+    
+    local currentSkill = tonumber(self.currentSkillBox:GetText())
+    local targetSkill = tonumber(self.targetSkillBox:GetText())
+    
+    if not currentSkill or not targetSkill then
+        print("Please enter valid skill levels")
+        return
+    end
+    
+    if currentSkill >= targetSkill then
+        print("Target skill must be higher than current skill")
+        return
+    end
+    
+    -- Check AH data age
+    self:CheckAHDataAge(function()
+        self:StartOptimization(currentSkill, targetSkill)
+    end)
+end
+
+function MainFrame:CheckAHDataAge(callback)
+    -- Check if we have recent AH data
+    if not ProfessionOptimizerDB then
+        ProfessionOptimizerDB = {}
+    end
+    
+    local lastScan = ProfessionOptimizerDB.lastAHScan or 0
+    local age = GetTime() - lastScan
+    
+    if age > (15 * 60) then -- 15 minutes
+        -- Show confirmation dialog
+        StaticPopupDialogs["PROFOPT_OLD_DATA"] = {
+            text = string.format(
+                "Auction House data is %d minutes old.\n\nScan fresh prices for accurate costs?",
+                math.floor(age / 60)
+            ),
+            button1 = "Scan Now",
+            button2 = "Use Old Data",
+            OnAccept = function()
+                MainFrame:ScanAuctionHouse(callback)
+            end,
+            OnCancel = function()
+                callback()
+            end,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+        }
+        StaticPopup_Show("PROFOPT_OLD_DATA")
+    else
+        callback()
+    end
+end
+
+function MainFrame:ScanAuctionHouse(callback)
+    print("Scanning Auction House...")
+    self.pathText:SetText("Scanning Auction House prices...\n\nThis may take 10-15 seconds...")
+    
+    -- Get scanner (assume it's loaded)
+    local scanner = _G.ProfessionOptimizerScanner
+    if not scanner then
+        print("ERROR: AH Scanner not loaded")
+        return
+    end
+    
+    local materials = scanner:GetAllMaterialsForProfession(self.selectedProfession)
+    
+    scanner:ScanMaterials(
+        materials,
+        function(scanned, total)
+            self.pathText:SetText(string.format(
+                "Scanning Auction House...\n\n%d / %d items scanned",
+                scanned, total
+            ))
+        end,
+        function(priceCache, failedItems)
+            ProfessionOptimizerDB.priceCache = priceCache
+            ProfessionOptimizerDB.lastAHScan = GetTime()
+            
+            print(string.format("AH scan complete! (%d items, %d unavailable)", 
+                #materials, #failedItems))
+            
+            callback()
+        end
+    )
+end
+
+function MainFrame:StartOptimization(currentSkill, targetSkill)
+    print("Starting optimization...")
+    
+    self.pathText:SetText("Calculating optimal path...\n\nPlease wait...")
+    self.optimizeButton:Disable()
+    
+    -- Get optimizer (assume it's loaded)
+    local optimizer = _G.ProfessionOptimizerEngine
+    if not optimizer then
+        print("ERROR: Optimizer not loaded")
+        self.optimizeButton:Enable()
+        return
+    end
+    
+    optimizer:Initialize(self.selectedProfession, currentSkill, targetSkill, {
+        allowFarming = true,
+        goldPerHour = 5000
+    })
+    
+    optimizer.auctionPrices = ProfessionOptimizerDB.priceCache or {}
+    
+    optimizer:StartCalculation(
+        function(result)
+            MainFrame:OnOptimizationComplete(result)
+        end,
+        function(progress)
+            self.pathText:SetText(string.format(
+                "Calculating optimal path...\n\nProgress: %.0f%%",
+                progress * 100
+            ))
+        end
+    )
+end
+
+function MainFrame:OnOptimizationComplete(result)
+    print("Optimization complete!")
+    
+    self.optimizeButton:Enable()
+    self.currentResult = result
+    
+    -- Display path
+    self:DisplayPath(result)
+    
+    -- Enable GPS button
+    self.gpsButton:Enable()
+    self.nextStepButton:Enable()
+    self.currentStep = 1
+end
+
+function MainFrame:DisplayPath(result)
+    local ahPath = result.ahPath
+    local farmPath = result.farmPath
+    
+    if not ahPath.success then
+        self.pathText:SetText("❌ No valid path found!\n\nThis may be due to:\n• Missing recipe data\n• Unavailable materials\n• Impossible skill range")
+        return
+    end
+    
+    -- Build display text
+    local text = ""
+    
+    -- Header
+    text = text .. "|cFFFFD700=== OPTIMAL PATH ===|r\n\n"
+    
+    -- Choose cheaper path
+    local path = ahPath
+    local pathType = "Pure AH"
+    
+    if farmPath.success and farmPath.totalCost < ahPath.totalCost then
+        path = farmPath
+        pathType = "Farm + AH"
+    end
+    
+    text = text .. string.format("|cFF00FF00%s Path|r\n", pathType)
+    text = text .. string.format("Total Cost: |cFFFFD700%dg|r\n", math.floor(path.totalCost / 10000))
+    
+    if path.totalFarmTime > 0 then
+        text = text .. string.format("Farm Time: |cFFFF8000%.1f hours|r\n", path.totalFarmTime)
+    end
+    
+    text = text .. string.format("Steps: %d\n\n", #path.steps)
+    
+    -- List steps
+    for i, step in ipairs(path.steps) do
+        text = text .. string.format(
+            "|cFF00FFFF[%d]|r %s\n   Craft: %dx | Skill: %d → %d\n\n",
+            i,
+            step.recipe.name,
+            step.craftsNeeded,
+            step.skillBefore,
+            step.skillAfter
+        )
+    end
+    
+    text = text .. "\n|cFF888888Click GPS button to navigate to trainers|r"
+    
+    self.pathText:SetText(text)
+    
+    -- Store for GPS
+    self.optimizedPath = path
+end
+
+function MainFrame:OnGPSClicked()
+    if not self.optimizedPath or not self.currentStep then
+        print("No path calculated")
+        return
+    end
+    
+    local step = self.optimizedPath.steps[self.currentStep]
+    if not step then
+        print("No more steps!")
+        return
+    end
+    
+    -- Get recipe source (trainer/vendor location)
+    local recipe = step.recipe
+    
+    self:SetTomTomWaypoint(recipe)
+end
+
+function MainFrame:SetTomTomWaypoint(recipe)
+    -- Check if TomTom is loaded
+    if not TomTom then
+        print("TomTom addon not found! Please install TomTom for GPS navigation.")
+        return
+    end
+    
+    -- TODO: Look up trainer/vendor location from database
+    -- For now, placeholder
+    local zone = "Dornogal"
+    local x, y = 50.0, 50.0
+    local title = string.format("Learn: %s", recipe.name)
+    
+    -- Add waypoint
+    TomTom:AddWaypoint(zone, x, y, {
+        title = title,
+        persistent = false,
+        minimap = true,
+        world = true
+    })
+    
+    print(string.format("📍 Waypoint set: %s in %s", title, zone))
+end
+
+function MainFrame:OnNextStepClicked()
+    if not self.currentStep or not self.optimizedPath then
+        return
+    end
+    
+    self.currentStep = self.currentStep + 1
+    
+    if self.currentStep > #self.optimizedPath.steps then
+        print("✅ All steps complete!")
+        self.currentStep = #self.optimizedPath.steps
+        return
+    end
+    
+    local step = self.optimizedPath.steps[self.currentStep]
+    print(string.format("Next: %s (x%d)", step.recipe.name, step.craftsNeeded))
+    
+    self:SetTomTomWaypoint(step.recipe)
+end
+
+-- ============================================
+-- TOGGLE FUNCTION
+-- ============================================
+
+function MainFrame:Toggle()
+    if self.frame:IsShown() then
+        self.frame:Hide()
+    else
+        self.frame:Show()
+    end
+end
+
+-- ============================================
+-- INITIALIZATION
+-- ============================================
+
+-- Create on load
+local frame = MainFrame:Create()
+
+-- Slash command
+SLASH_PROFESSIONOPTIMIZER1 = "/profopt"
+SLASH_PROFESSIONOPTIMIZER2 = "/po"
+SlashCmdList["PROFESSIONOPTIMIZER"] = function(msg)
+    MainFrame:Toggle()
+end
+
+print("|cFF00FF00Profession Optimizer|r loaded! Type |cFFFFD700/profopt|r to open")
+
+-- Export for other files
+_G.ProfessionOptimizerUI = MainFrame
